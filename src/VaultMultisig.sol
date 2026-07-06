@@ -58,17 +58,25 @@ contract VaultMultisig {
     /// @param transferId The ID of the transfer
     error QuorumHasNotBeenReached(uint256 transferId);
 
-    error InsufficientBalance(uint256, uint256);
+    /// @notice Checks that the contract balance is sufficient to cover the transfer amount
+    /// @param available The current balance of the contract
+    /// @param required The amount requested by the transfer
+    error InsufficientBalance(uint256 available, uint256 required);
 
+    /// @notice Thrown when the low-level ETH call to the recipient fails
+    /// @param transferId The ID of the transfer
     error TransferFailed(uint256 transferId);
 
-    /// @notice Emitted when a transfer is approved
+    /// @notice Emitted when a new transfer is initiated
     event TransferInitiated(uint256 indexed transferId, address indexed to, uint256 amount);
 
+    /// @notice Emitted when a signer approves a pending transfer
     event TransferApproved(uint256 transferId, address signer);
 
+    /// @notice Emitted when a transfer is executed and funds are sent
     event TransferExecuted(uint256 transferId);
 
+    /// @notice Restricts a function to addresses registered as multisig signers
     modifier onlyMultisigSigner() {
         if (!multiSigSigners[msg.sender]) revert InvalidMultisigSigner();
         _;
