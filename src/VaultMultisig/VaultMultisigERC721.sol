@@ -3,7 +3,7 @@ pragma solidity ^0.8.30;
 
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 
-contract VaultMultisigERC20 {
+contract VaultMultisigERC721 {
 
     IERC721 public token;
 
