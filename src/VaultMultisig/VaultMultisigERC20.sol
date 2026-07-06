@@ -2,21 +2,24 @@
 pragma solidity ^0.8.30;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract VaultMultisigERC20 {
+    using SafeERC20 for IERC20;
 
+    /// @notice The ERC20 token held and transferred by this vault
     IERC20 public token;
 
-        /// @notice The number of signatures required to execute a transaction
+    /// @notice The number of signatures required to execute a transfer
     uint256 public quorum;
 
-    /// @notice The number of transfers executed
+    /// @notice The total number of transfers ever initiated (also used as the next transfer ID)
     uint256 public transfersCount;
 
     /// @dev The struct is used to store the details of a transfer
     /// @param to The address of the recipient
     /// @param amount The amount of tokens to transfer
-    /// @param approvals The number of approvals required to execute the transfer
+    /// @param approvals The number of approvals collected so far
     /// @param executed Whether the transfer has been executed
     /// @param approved The mapping of signers to their approval status
     struct Transfer {
@@ -33,44 +36,51 @@ contract VaultMultisigERC20 {
     /// @notice The mapping for verification that address is a signer
     mapping (address => bool) private multiSigSigners;
 
-    /// @notice Checks that signers array is not empty
+    /// @notice Thrown in the constructor when the signers array is empty
     error SignersArrayCannotBeEmpty();
 
-    /// @notice Checks that quorum is not greater than the number of signers
+    /// @notice Thrown in the constructor when the quorum exceeds the number of signers
     error QuorumGreaterThanSigners();
 
-    /// @notice Checks that quorum is greater than zero
+    /// @notice Thrown in the constructor when the quorum is zero
     error QuorumCannotBeZero();
 
-    /// @notice Checks that the recipient is not zero address
+    /// @notice Thrown in the constructor when a signer address is the zero address
+    error InvalidSignerAddress();
+
+    /// @notice Thrown in the constructor when the same address is listed as a signer more than once
+    /// @param signer The address that was duplicated
+    error DuplicateSigner(address signer);
+
+    /// @notice Thrown when the recipient of a transfer is the zero address
     error InvalidRecipient();
 
-    /// @notice Checks that amount is greater than zero
+    /// @notice Thrown when the requested transfer amount is zero
     error InvalidAmount();
 
-    /// @notice Checks that the signer is a multisig signer
+    /// @notice Thrown when the caller is not a registered multisig signer
     error InvalidMultisigSigner();
 
-    /// @notice Checks that the transfer is not already executed
+    /// @notice Thrown when referencing a transfer ID that was never initiated
+    /// @param transferId The ID of the transfer
+    error TransferDoesNotExist(uint256 transferId);
+
+    /// @notice Thrown when acting on a transfer that has already been executed
     /// @param transferId The ID of the transfer
     error TransferAlreadyExecuted(uint256 transferId);
 
-    /// @notice Checks that the signer has already approved the transfer
+    /// @notice Thrown when a signer tries to approve a transfer they already approved
     /// @param signer The address of the signer
     error SignerAlreadyApproved(address signer);
 
-    /// @notice Checks that quorum was reached for transfer
+    /// @notice Thrown when trying to execute a transfer that has not collected enough approvals
     /// @param transferId The ID of the transfer
     error QuorumHasNotBeenReached(uint256 transferId);
 
-    /// @notice Checks that the contract balance is sufficient to cover the transfer amount
-    /// @param available The current balance of the contract
+    /// @notice Thrown when the contract's token balance is insufficient to cover the transfer amount
+    /// @param available The current token balance of the contract
     /// @param required The amount requested by the transfer
     error InsufficientBalance(uint256 available, uint256 required);
-
-    /// @notice Thrown when the low-level ETH call to the recipient fails
-    /// @param transferId The ID of the transfer
-    error TransferFailed(uint256 transferId);
 
     /// @notice Emitted when a new transfer is initiated
     event TransferInitiated(uint256 indexed transferId, address indexed to, uint256 amount);
@@ -78,7 +88,7 @@ contract VaultMultisigERC20 {
     /// @notice Emitted when a signer approves a pending transfer
     event TransferApproved(uint256 transferId, address signer);
 
-    /// @notice Emitted when a transfer is executed and funds are sent
+    /// @notice Emitted when a transfer is executed and tokens are sent
     event TransferExecuted(uint256 transferId);
 
     /// @notice Restricts a function to addresses registered as multisig signers
@@ -87,6 +97,17 @@ contract VaultMultisigERC20 {
         _;
     }
 
+    /// @notice Restricts a function to transfer IDs that were actually initiated
+    /// @param _transferId The ID of the transfer to check
+    modifier transferExists(uint256 _transferId) {
+        if (_transferId >= transfersCount) revert TransferDoesNotExist(_transferId);
+        _;
+    }
+
+    /// @notice Initialize the multisig contract
+    /// @param _token The ERC20 token to be held and transferred by this vault
+    /// @param _signers The array of multisig signers
+    /// @param _quorum The number of signers required to execute a transfer
     constructor(address _token, address[] memory _signers, uint256 _quorum) {
         if (_signers.length == 0) revert SignersArrayCannotBeEmpty();
         if (_quorum > _signers.length) revert QuorumGreaterThanSigners();
@@ -95,32 +116,44 @@ contract VaultMultisigERC20 {
         token = IERC20(_token);
 
         for (uint256 i = 0; i < _signers.length; i++) {
-            multiSigSigners[_signers[i]] = true;
+            address signer = _signers[i];
+            // Reject the zero address and duplicate entries so that the
+            // effective number of unique signers always matches _signers.length,
+            // otherwise quorum could become unreachable (or a phantom signer registered).
+            if (signer == address(0)) revert InvalidSignerAddress();
+            if (multiSigSigners[signer]) revert DuplicateSigner(signer);
+
+            multiSigSigners[signer] = true;
         }
         quorum = _quorum;
     }
 
-    /// @notice Initiates a transfer
+    /// @notice Initiates a transfer; the initiator's approval is counted immediately
     /// @param _to The address of the recipient
     /// @param _amount The amount of tokens to transfer
     function initiateTransfer(address _to, uint256 _amount) external onlyMultisigSigner {
         if (_to == address(0)) revert InvalidRecipient();
-        if (_amount <= 0) revert InvalidAmount();
+        if (_amount == 0) revert InvalidAmount();
 
         uint256 transferId = transfersCount++;
         Transfer storage transfer = transfers[transferId];
         transfer.to = _to;
         transfer.amount = _amount;
-        transfer.approvals = 0;
+        // The initiator implicitly approves their own transfer, so the approval
+        // count must start at 1 to stay consistent with `approved[msg.sender] = true`
+        // below (otherwise the initiator's vote would never be reflected in `approvals`,
+        // and they would be permanently blocked from approving it later by
+        // SignerAlreadyApproved).
+        transfer.approvals = 1;
         transfer.executed = false;
         transfer.approved[msg.sender] = true;
 
         emit TransferInitiated(transferId, _to, _amount);
     }
 
-    /// @notice Approves a transfer
+    /// @notice Approves a pending transfer
     /// @param _transferId The ID of the transfer
-    function approveTransfer(uint256 _transferId) external onlyMultisigSigner {
+    function approveTransfer(uint256 _transferId) external onlyMultisigSigner transferExists(_transferId) {
         Transfer storage transfer = transfers[_transferId];
         if (transfer.executed) revert TransferAlreadyExecuted(_transferId);
         if (transfer.approved[msg.sender]) revert SignerAlreadyApproved(msg.sender);
@@ -131,25 +164,34 @@ contract VaultMultisigERC20 {
         emit TransferApproved(_transferId, msg.sender);
     }
 
-    function executeTransfer(uint256 _transferId) external onlyMultisigSigner {
+    /// @notice Executes a transfer once quorum has been reached, sending tokens to the recipient
+    /// @param _transferId The ID of the transfer
+    function executeTransfer(uint256 _transferId) external onlyMultisigSigner transferExists(_transferId) {
         Transfer storage transfer = transfers[_transferId];
         if (transfer.approvals < quorum) revert QuorumHasNotBeenReached(_transferId);
         if (transfer.executed) revert TransferAlreadyExecuted(_transferId);
 
         uint256 balance = token.balanceOf(address(this));
-        if(transfer.amount > balance) revert InsufficientBalance(balance, transfer.amount);
+        if (transfer.amount > balance) revert InsufficientBalance(balance, transfer.amount);
 
-        bool success = token.transfer(payable(transfer.to), transfer.amount);
-        if (!success) revert TransferFailed(_transferId);
-
+        // Effects before interaction: mark as executed before the external call so a
+        // token with transfer hooks (e.g. ERC777-like callbacks) cannot re-enter
+        // executeTransfer and drain the vault multiple times for the same approval.
         transfer.executed = true;
+
+        // safeTransfer reverts on failure and correctly handles non-standard
+        // ERC20 tokens (e.g. USDT) that don't strictly return a bool.
+        token.safeTransfer(transfer.to, transfer.amount);
 
         emit TransferExecuted(_transferId);
     }
 
-    /// @notice Default fallback function for receiving ETH
-    receive() external payable {}
-
+    /// @notice Returns the stored details of a transfer
+    /// @param _transferId The ID of the transfer
+    /// @return to The recipient address
+    /// @return amount The amount of the transfer
+    /// @return approvals The number of approvals collected so far
+    /// @return executed Whether the transfer has been executed
     function getTransfer(uint256 _transferId) external view returns (
         address to,
         uint256 amount,
@@ -160,15 +202,23 @@ contract VaultMultisigERC20 {
         return (transfer.to, transfer.amount, transfer.approvals, transfer.executed);
     }
 
+    /// @notice Checks whether a given signer has approved a given transfer
+    /// @param _transferId The ID of the transfer
+    /// @param _signer The address of the signer to check
+    /// @return Whether the signer has approved the transfer
     function hasSignedTransfer(uint256 _transferId, address _signer) external view returns (bool) {
         Transfer storage transfer = transfers[_transferId];
         return transfer.approved[_signer];
     }
 
+    /// @notice Returns the total number of transfers ever initiated
+    /// @return The total number of transfers
     function getTransfersCount() external view returns (uint256) {
         return transfersCount;
     }
 
+    /// @notice Returns the address of the ERC20 token held by this vault
+    /// @return The token contract address
     function getTokenAddress() external view returns (address) {
         return address(token);
     }
