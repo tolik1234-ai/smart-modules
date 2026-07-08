@@ -4,7 +4,6 @@ pragma solidity ^0.8.30;
 import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
 contract VaultMultisigERC1155 {
-
     /// @notice The ERC1155 token held and transferred by this vault
     IERC1155 public token;
 
@@ -31,10 +30,10 @@ contract VaultMultisigERC1155 {
     }
 
     /// @notice The mapping of transfer IDs to transfer details
-    mapping (uint256 => Transfer) private transfers;
+    mapping(uint256 => Transfer) private transfers;
 
     /// @notice The mapping for verification that address is a signer
-    mapping (address => bool) private multiSigSigners;
+    mapping(address => bool) private multiSigSigners;
 
     /// @notice Thrown in the constructor when the signers array is empty
     error SignersArrayCannotBeEmpty();
@@ -178,7 +177,9 @@ contract VaultMultisigERC1155 {
         if (transfer.approvals < quorum) revert QuorumHasNotBeenReached(_transferId);
         if (transfer.executed) revert TransferAlreadyExecuted(_transferId);
 
-        if (token.balanceOf(address(this), transfer.tokenId) < transfer.amount) revert NotEnoughTokens(transfer.tokenId);
+        if (token.balanceOf(address(this), transfer.tokenId) < transfer.amount) {
+            revert NotEnoughTokens(transfer.tokenId);
+        }
 
         // Effects before interaction: mark as executed before the external call.
         // safeTransferFrom invokes onERC1155Received on contract recipients, which
@@ -197,13 +198,11 @@ contract VaultMultisigERC1155 {
     /// @return amount The amount of the transfer
     /// @return approvals The number of approvals collected so far
     /// @return executed Whether the transfer has been executed
-    function getTransfer(uint256 _transferId) external view returns (
-        address to,
-        uint256 tokenId,
-        uint256 amount,
-        uint256 approvals,
-        bool executed
-    ) {
+    function getTransfer(uint256 _transferId)
+        external
+        view
+        returns (address to, uint256 tokenId, uint256 amount, uint256 approvals, bool executed)
+    {
         Transfer storage transfer = transfers[_transferId];
         return (transfer.to, transfer.tokenId, transfer.amount, transfer.approvals, transfer.executed);
     }

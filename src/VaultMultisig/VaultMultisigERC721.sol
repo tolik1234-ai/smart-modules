@@ -4,7 +4,6 @@ pragma solidity ^0.8.30;
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 
 contract VaultMultisigERC721 {
-
     /// @notice The ERC721 token held and transferred by this vault
     IERC721 public token;
 
@@ -29,10 +28,10 @@ contract VaultMultisigERC721 {
     }
 
     /// @notice The mapping of transfer IDs to transfer details
-    mapping (uint256 => Transfer) private transfers;
+    mapping(uint256 => Transfer) private transfers;
 
     /// @notice The mapping for verification that address is a signer
-    mapping (address => bool) private multiSigSigners;
+    mapping(address => bool) private multiSigSigners;
 
     /// @notice Thrown in the constructor when the signers array is empty
     error SignersArrayCannotBeEmpty();
@@ -188,12 +187,11 @@ contract VaultMultisigERC721 {
     /// @return tokenId The ID of the NFT being transferred
     /// @return approvals The number of approvals collected so far
     /// @return executed Whether the transfer has been executed
-    function getTransfer(uint256 _transferId) external view returns (
-        address to,
-        uint256 tokenId,
-        uint256 approvals,
-        bool executed
-    ) {
+    function getTransfer(uint256 _transferId)
+        external
+        view
+        returns (address to, uint256 tokenId, uint256 approvals, bool executed)
+    {
         Transfer storage transfer = transfers[_transferId];
         return (transfer.to, transfer.tokenId, transfer.approvals, transfer.executed);
     }

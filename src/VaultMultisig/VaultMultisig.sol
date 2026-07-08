@@ -23,10 +23,10 @@ contract VaultMultisig {
     }
 
     /// @notice The mapping of transfer IDs to transfer details
-    mapping (uint256 => Transfer) private transfers;
+    mapping(uint256 => Transfer) private transfers;
 
     /// @notice The mapping for verification that address is a signer
-    mapping (address => bool) private multiSigSigners;
+    mapping(address => bool) private multiSigSigners;
 
     /// @notice Thrown in the constructor when the signers array is empty
     error SignersArrayCannotBeEmpty();
@@ -173,7 +173,7 @@ contract VaultMultisig {
         // same approved transfer.
         transfer.executed = true;
 
-        (bool success, ) = transfer.to.call{value: transfer.amount}("");
+        (bool success,) = transfer.to.call{value: transfer.amount}("");
         if (!success) revert TransferFailed(_transferId);
 
         emit TransferExecuted(_transferId);
@@ -188,12 +188,11 @@ contract VaultMultisig {
     /// @return amount The amount of the transfer
     /// @return approvals The number of approvals collected so far
     /// @return executed Whether the transfer has been executed
-    function getTransfer(uint256 _transferId) external view returns (
-        address to,
-        uint256 amount,
-        uint256 approvals,
-        bool executed
-    ) {
+    function getTransfer(uint256 _transferId)
+        external
+        view
+        returns (address to, uint256 amount, uint256 approvals, bool executed)
+    {
         Transfer storage transfer = transfers[_transferId];
         return (transfer.to, transfer.amount, transfer.approvals, transfer.executed);
     }
