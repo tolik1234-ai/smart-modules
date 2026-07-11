@@ -78,6 +78,9 @@ contract VaultMultisig {
     /// @param transferId The ID of the transfer
     error TransferFailed(uint256 transferId);
 
+    /// @notice Throw when the balance of this contract is zero
+    error VaultIsEmpty();
+
     /// @notice Emitted when a new transfer is initiated
     event TransferInitiated(uint256 indexed transferId, address indexed to, uint256 amount);
 
@@ -127,6 +130,7 @@ contract VaultMultisig {
     function initiateTransfer(address _to, uint256 _amount) external onlyMultisigSigner {
         if (_to == address(0)) revert InvalidRecipient();
         if (_amount == 0) revert InvalidAmount();
+        if (address(this).balance <= 0) revert VaultIsEmpty();
 
         uint256 transferId = transfersCount++;
         Transfer storage transfer = transfers[transferId];
