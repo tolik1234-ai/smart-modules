@@ -4,9 +4,11 @@ pragma solidity ^0.8.30;
 import {Test} from "forge-std/Test.sol";
 import {console} from "forge-std/console.sol";
 import {VaultMultisig} from "../src/VaultMultisig/VaultMultisig.sol";
+import {AccessManager} from "../src/AccessManager/AccessManager.sol";
 
 contract VaultMultisigTest is Test {
     VaultMultisig vault;
+    AccessManager accessManager;
     uint256 quorum = 2;
     address[] signers;
 
@@ -21,19 +23,25 @@ contract VaultMultisigTest is Test {
         signers.push(signer2);
         signers.push(signer3);
 
-        vault = new VaultMultisig(signers, quorum);
+        accessManager = new AccessManager();
+        vault = new VaultMultisig(signers, quorum, address(accessManager));
     }
 
     // =====================Test Functions=====================
-    function test_InitiateTransferRevertIfNoEtherOnVault(address _randomAddress) public {
+    function test_ExecuteTransferRevertIfNoEtherOnVault(address _randomAddress) public {
         vm.assume(_randomAddress != address(0));
 
         vm.prank(signer1);
+        vault.initiateTransfer(_randomAddress, 1 wei);
 
-        vm.expectRevert(VaultMultisig.VaultIsEmpty.selector);
+        vm.prank(signer2);
+        vault.approveTransfer(0);
 
         console.log("Vault Balance:", address(vault).balance);
-        vault.initiateTransfer(_randomAddress, 1 wei);
+
+        vm.prank(signer1);
+        vm.expectRevert(abi.encodeWithSelector(VaultMultisig.InsufficientBalance.selector, 0, 1 wei));
+        vault.executeTransfer(0);
     }
 
     function test_InitiateTransferRevertIfInvalidRecipient() public {
@@ -150,7 +158,7 @@ contract VaultMultisigTest is Test {
         vault.executeTransfer(0);
 
         vm.prank(signer1);
-        vm.expectRevert(abi.encodeWithSelector(VaultMultisig.TransferAlreadyExecuted.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(VaultMultisig.TransferIsAlreadyExecuted.selector, 0));
         vault.executeTransfer(0);
     }
 
@@ -195,7 +203,7 @@ contract VaultMultisigTest is Test {
             vm.prank(signer1);
             vault.initiateTransfer(defaultRecipient, 1 ether);
 
-            uint256 transferCount = vault.getTransfersCount();
+            uint256 transferCount = vault.getTransferCount();
             assertEq(transferCount - 1, i);
 
             console.log(transferCount);
@@ -206,17 +214,17 @@ contract VaultMultisigTest is Test {
         address[] memory empty;
 
         vm.expectRevert(VaultMultisig.SignersArrayCannotBeEmpty.selector);
-        new VaultMultisig(empty, quorum);
+        new VaultMultisig(empty, quorum, address(accessManager));
     }
 
     function test_constructorRevertQuorumGreaterThanSigners() public {
         vm.expectRevert(VaultMultisig.QuorumGreaterThanSigners.selector);
-        new VaultMultisig(signers, 4);
+        new VaultMultisig(signers, 4, address(accessManager));
     }
 
     function test_constructorRevertQuorumCannotBeZero() public {
         vm.expectRevert(VaultMultisig.QuorumCannotBeZero.selector);
-        new VaultMultisig(signers, 0);
+        new VaultMultisig(signers, 0, address(accessManager));
     }
 
     // =====================Internal Functions=====================
